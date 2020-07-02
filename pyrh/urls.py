@@ -32,6 +32,8 @@ WATCHLISTS = API_BASE / "watchlists/"  # not implemented
 
 # Options
 OPTIONS_BASE = API_BASE / "options/"
+OPTIONS_EVENT = OPTIONS_BASE / "events/"
+OPTIONS_ORDER = OPTIONS_BASE / "orders/"
 OPTIONS_CHAIN_BASE = OPTIONS_BASE / "chains/"
 OPTIONS_INSTRUMENTS_BASE = OPTIONS_BASE / "instruments/"
 
