@@ -1,15 +1,20 @@
 """robinhood.py: a collection of utilities for working with Robinhood's Private API."""
 
 from enum import Enum
+from typing import Iterable
 from urllib.parse import unquote
 
 import dateutil
 import requests
+from yarl import URL
 
 from pyrh import urls
 from pyrh.exceptions import InvalidTickerSymbol
 from pyrh.models import (
     InstrumentManager,
+    OptionManager,
+    OptionPosition,
+    OptionQuote,
     PortfolioSchema,
     SessionManager,
     SessionManagerSchema,
@@ -33,7 +38,7 @@ class Transaction(Enum):
     SELL = "sell"
 
 
-class Robinhood(InstrumentManager, SessionManager):
+class Robinhood(InstrumentManager, OptionManager, SessionManager):
     """Wrapper class for fetching/parsing Robinhood endpoints.
 
     Please see :py:class:`SessionManager` for login functionality.
@@ -519,23 +524,30 @@ class Robinhood(InstrumentManager, SessionManager):
     #         raise InvalidOptionId()
     #     return market_data
 
+    def get_option_positions(self, open_pos: bool = True) -> Iterable[OptionPosition]:
+        # TODO figure out what /?nonzero=true is, returns quantity = 0...
+        return self._get_option_positions(open_pos)
+        # url = urls.OPTIONS_BASE.join(URL("positions/?nonzero=true"))
+        # options = base_paginator(url, self, OptionPaginatorSchema())
+        # if open_pos:
+        #     filter_ = lambda x: float(x.get("quantity")) > 0
+        #     options = [o for o in options if filter_(o)]
+        # return options
+
     def options_owned(self):
-        options = self.get_url(urls.options_base() + "positions/?nonzero=true")
+        options = self.get_url(urls.OPTIONS_BASE.join(URL("positions/?nonzero=true")))
         options = options["results"]
         return options
 
-    def get_option_marketdata(self, instrument):
-        info = self.get_url(
-            urls.build_market_data() + "options/?instruments=" + instrument
-        )
-        return info["results"][0]
+    def get_option_marketdata(self, option_id):
+        info = self.get_url(urls.MARKET_DATA_BASE.join(URL(f"options/{option_id}/")))
+        return info
 
     def get_option_chainid(self, symbol):
-        stock_info = self.get_url(self.endpoints["instruments"] + "?symbol=" + symbol)
-        stock_id = stock_info["results"][0]["id"]
-        params = {}
-        params["equity_instrument_ids"] = stock_id
-        chains = self.get_url(urls.options_base() + "chains/", params=params)
+        stock_info = self.get_url(urls.INSTRUMENTS_BASE.with_query(symbol=symbol))
+        instrument_id = stock_info["results"][0]["id"]
+        url = urls.OPTIONS_BASE.join(URL("chains/"))
+        chains = self.get_url(url.with_query(equity_instrument_ids=instrument_id))
         chains = chains["results"]
         chain_id = None
 
@@ -545,24 +557,11 @@ class Robinhood(InstrumentManager, SessionManager):
 
         return chain_id
 
-    def get_option_quote(self, arg_dict):
-        chain_id = self.get_option_chainid(arg_dict.pop("symbol", None))
-        arg_dict["chain_id"] = chain_id
-        option_info = self.get_url(
-            self.endpoints.options_base() + "instruments/", params=arg_dict
-        )
-        option_info = option_info["results"]
-        exp_price_list = []
-
-        for op in option_info:
-            mrkt_data = self.get_option_marketdata(op["url"])
-            op_price = mrkt_data["adjusted_mark_price"]
-            exp = op["expiration_date"]
-            exp_price_list.append((exp, op_price))
-
-        exp_price_list.sort()
-
-        return exp_price_list
+    def get_option_quote(
+        self, symbol, strike, expiry, otype, state="active"
+    ) -> OptionQuote:
+        option_id = self._get_option_id(symbol, strike, expiry, otype, state)
+        return self._get_option_quote(option_id)
 
     ###########################################################################
     #                           GET FUNDAMENTALS
